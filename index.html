@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Pixel Atelier | Photo to paint-by-numbers</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;700&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <a class="brand" href=".">
+          <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+          <span>pixel <em>atelier</em></span>
+        </a>
+        <div class="topbar-meta"><span class="status-dot"></span> studio mode <span class="meta-divider"></span> your images stay local</div>
+        <button class="icon-button" id="resetButton" title="Start over" aria-label="Start over">↺</button>
+      </header>
+
+      <main class="workspace">
+        <aside class="controls-panel">
+          <div class="eyebrow">01 / source image</div>
+          <h1>Make something<br /><span>worth hanging.</span></h1>
+          <p class="lede">Turn a favorite photo into a high-resolution pixel artwork, then map every color into a calm, paintable plan.</p>
+
+          <label class="upload-zone" for="imageInput" id="uploadZone">
+            <span class="upload-icon">↑</span>
+            <strong>Drop an image here</strong>
+            <small>or click to browse · JPG, PNG, WEBP</small>
+            <input id="imageInput" type="file" accept="image/png,image/jpeg,image/webp" />
+          </label>
+
+          <div class="or-rule"><span>or start with</span></div>
+          <button class="demo-button" id="demoButton"><span class="button-spark">✦</span> the studio still life</button>
+
+          <div class="settings-section">
+            <div class="eyebrow">02 / art direction</div>
+            <div class="setting-row"><div><b>Canvas resolution</b><small>more detail, larger print</small></div><select id="gridSize"><option value="32" selected>32 × 32</option><option value="64">64 × 64</option><option value="96">96 × 96</option><option value="128">128 × 128</option><option value="256">256 × 256</option><option value="512">512 × 512</option></select></div>
+            <div class="setting-row"><div><b>Color palette</b><small>number of paint pots</small></div><select id="paletteSize"><option value="12">12 colors</option><option value="18" selected>18 colors</option><option value="24">24 colors</option><option value="32">32 colors</option><option value="48">48 colors</option><option value="64">64 colors</option><option value="unlimited">No limit</option></select></div>
+            <div class="setting-row"><div><b>Image fit</b><small>how the image fills the canvas</small></div><select id="fitMode"><option value="fit" selected>Fit</option><option value="crop">Crop</option><option value="stretch">Stretch</option></select></div>
+            <div class="setting-row"><div><b>Filter</b><small>color treatment before pixelation</small></div><select id="filterMode"><option value="none" selected>Original</option><option value="grayscale">Grayscale</option><option value="cyberpunk">Cyberpunk</option><option value="dual-tone">Dual tone</option><option value="pixel-art">Pixel art</option></select></div>
+            <div class="setting-row"><div><b>Orientation</b><small>portrait or landscape layout</small></div><select id="orientation"><option value="auto" selected>Auto</option><option value="portrait">Portrait</option><option value="landscape">Landscape</option></select></div>
+            <div class="setting-row"><div><b>Canvas format</b><small>ratio and finished size</small></div><select id="printSize"><option value="image" selected>Image ratio</option><option value="square">1:1 · 12 × 12 in</option><option value="a4">A4 · 8.27 × 11.69 in</option><option value="a5">A5 · 5.83 × 8.27 in</option><option value="poster-11x17">Poster · 11 × 17 in</option><option value="poster-18x24">Poster · 18 × 24 in</option><option value="poster-24x36">Poster · 24 × 36 in</option><option value="poster-27x40">Poster · 27 × 40 in</option><option value="photo-4x6">Photo · 4 × 6 in</option><option value="photo-5x7">Photo · 5 × 7 in</option><option value="photo-8x10">Photo · 8 × 10 in</option></select></div>
+          </div>
+
+          <div class="panel-footer"><span class="lock">⌑</span> Processed privately in your browser</div>
+        </aside>
+
+        <section class="canvas-area">
+          <div class="canvas-toolbar">
+            <div class="mode-tabs" role="group" aria-label="Artwork view">
+              <button class="mode-tab active" data-mode="pixel" aria-pressed="true">Pixel</button>
+              <button class="mode-tab" data-mode="numbers" aria-pressed="false">Numbers</button>
+              <button class="mode-tab" data-mode="blank" aria-pressed="false">Blank</button>
+            </div>
+            <div class="toolbar-actions"><span class="dimension-label" id="dimensionLabel">32 × 32 in · 96 DPI</span><button class="export-button" id="exportButton"><span>↓</span> Export print</button></div>
+          </div>
+
+          <div class="artboard-wrap">
+            <div class="artboard-shadow"></div>
+            <div class="artboard" id="artboard">
+              <canvas id="artCanvas" width="768" height="768"></canvas>
+              <div class="processing-state" id="processingState"><span class="spinner"></span><b>Building your artwork</b><small>Mapping pixels and paint colors</small></div>
+              <div class="canvas-empty" id="canvasEmpty"><span class="empty-mark">✦</span><b>Your canvas is waiting</b><small>Upload a photo or use the studio still life</small></div>
+            </div>
+          </div>
+          <div class="canvas-caption"><span id="captionText">A quiet study in terracotta and light</span><span class="caption-rule"></span><span>ready for your wall</span></div>
+        </section>
+
+        <aside class="palette-panel">
+          <div class="palette-heading"><div><div class="eyebrow">03 / palette</div><h2 id="paletteTitle">18 paint pots</h2></div><span class="palette-count" id="paletteCount">01—18</span></div>
+          <p class="palette-note" id="paletteNote">Each number corresponds to one paint color in your print.</p>
+          <div class="swatch-list-container">
+            <div class="swatch-list" id="swatchList"></div>
+          </div>
+          <div class="legend"><span class="legend-line"></span><span>Color order follows the artwork from light to dark.</span></div>
+          <button class="secondary-action" id="savePaletteButton">▣ Save palette card <span>↗</span></button>
+          <button class="secondary-action bundle-action" id="bundleButton">▣ Download complete project <span>↓</span></button>
+        </aside>
+      </main>
+      <footer class="footer"><span>pixel atelier / 2026</span><span>made for slow afternoons</span><span>v1.0 · local studio</span></footer>
+    </div>
+    <script src="app.js"></script>
+  </body>
+</html>
