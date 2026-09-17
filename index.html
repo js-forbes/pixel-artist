@@ -41,7 +41,7 @@
             <div class="setting-row"><div><b>Canvas resolution</b><small>more detail, larger print</small></div><select id="gridSize"><option value="32" selected>32 × 32</option><option value="64">64 × 64</option><option value="96">96 × 96</option><option value="128">128 × 128</option><option value="256">256 × 256</option><option value="512">512 × 512</option></select></div>
             <div class="setting-row"><div><b>Color palette</b><small>number of paint pots</small></div><select id="paletteSize"><option value="12">12 colors</option><option value="18" selected>18 colors</option><option value="24">24 colors</option><option value="32">32 colors</option><option value="48">48 colors</option><option value="64">64 colors</option><option value="unlimited">No limit</option></select></div>
             <div class="setting-row"><div><b>Image fit</b><small>how the image fills the canvas</small></div><select id="fitMode"><option value="fit" selected>Fit</option><option value="crop">Crop</option><option value="stretch">Stretch</option></select></div>
-            <div class="setting-row"><div><b>Filter</b><small>color treatment before pixelation</small></div><select id="filterMode"><option value="none" selected>Original</option><option value="grayscale">Grayscale</option><option value="cyberpunk">Cyberpunk</option><option value="dual-tone">Dual tone</option><option value="pixel-art">Pixel art</option></select></div>
+            <div class="setting-row"><div><b>Filter</b><small>color treatment before pixelation</small></div><select id="filterMode"><option value="none" selected>Original</option><option value="canva">Canva pixel art</option><option value="shape-fill">Shape fill</option><option value="grayscale">Grayscale</option><option value="cyberpunk">Cyberpunk</option><option value="dual-tone">Dual tone</option><option value="pixel-art">Pixel art</option></select></div>
             <div class="setting-row"><div><b>Orientation</b><small>portrait or landscape layout</small></div><select id="orientation"><option value="auto" selected>Auto</option><option value="portrait">Portrait</option><option value="landscape">Landscape</option></select></div>
             <div class="setting-row"><div><b>Canvas format</b><small>ratio and finished size</small></div><select id="printSize"><option value="image" selected>Image ratio</option><option value="square">1:1 · 12 × 12 in</option><option value="a4">A4 · 8.27 × 11.69 in</option><option value="a5">A5 · 5.83 × 8.27 in</option><option value="poster-11x17">Poster · 11 × 17 in</option><option value="poster-18x24">Poster · 18 × 24 in</option><option value="poster-24x36">Poster · 24 × 36 in</option><option value="poster-27x40">Poster · 27 × 40 in</option><option value="photo-4x6">Photo · 4 × 6 in</option><option value="photo-5x7">Photo · 5 × 7 in</option><option value="photo-8x10">Photo · 8 × 10 in</option></select></div>
           </div>
@@ -67,7 +67,7 @@
               <div class="canvas-empty" id="canvasEmpty"><span class="empty-mark">✦</span><b>Your canvas is waiting</b><small>Upload a photo or use the studio still life</small></div>
             </div>
           </div>
-          <div class="canvas-caption"><span id="captionText">A quiet study in terracotta and light</span><span class="caption-rule"></span><span>ready for your wall</span></div>
+          <div class="canvas-caption"><span id="captionText">A quiet study in terracotta and light</span><span class="caption-rule"></span><span id="statusText">ready</span></div>
         </section>
 
         <aside class="palette-panel">

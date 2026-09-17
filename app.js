@@ -85,7 +85,14 @@ function render() {
   const paletteSetting = document.getElementById('paletteSize').value;
   const unlimited = paletteSetting === 'unlimited';
   const count = unlimited ? 0 : Number(paletteSetting);
-  renderArtwork(size, count, unlimited);
+  try {
+    renderArtwork(size, count, unlimited);
+    document.getElementById('statusText').textContent = 'ready';
+  } catch (error) {
+    console.error('Pixel art render failed:', error);
+    processingState.hidden = true;
+    document.getElementById('statusText').textContent = 'render error - see console';
+  }
 }
 
 function renderArtwork(size, count, unlimited) {
@@ -94,14 +101,18 @@ function renderArtwork(size, count, unlimited) {
   workingCtx.imageSmoothingEnabled = false;
   drawSourceImage(workingCtx, size, size);
   applyFilter(workingCtx, size, size);
-  const pixels = workingCtx.getImageData(0, 0, size, size).data;
-  const colors = []; const mapped = []; const colorMap = new Map();
+  const filteredImage = workingCtx.getImageData(0, 0, size, size);
+  if (document.getElementById('filterMode').value === 'shape-fill') fillDominantShapes(filteredImage, size, size);
+  const pixels = filteredImage.data;
+  const canvaFilter = document.getElementById('filterMode').value === 'canva';
+  const canvaPalette = canvaFilter ? buildCanvaPalette(pixels, Math.min(count || 24, 24)) : [];
+  const colors = canvaFilter ? canvaPalette.slice() : []; const mapped = []; const colorMap = new Map();
   for (let i = 0; i < pixels.length; i += 4) {
     const sourceColor = [pixels[i], pixels[i + 1], pixels[i + 2]];
-    const color = unlimited ? adaptiveColor(sourceColor) : quantize(sourceColor, count);
+    const color = canvaFilter ? nearestColor(sourceColor, canvaPalette) : unlimited ? adaptiveColor(sourceColor) : quantize(sourceColor, count);
     const key = color.join(',');
     let index = colorMap.get(key);
-    if (index === undefined && (unlimited || colors.length < count)) { index = colors.length; colors.push(color); colorMap.set(key, index); }
+    if (index === undefined && !canvaFilter && (unlimited || colors.length < count)) { index = colors.length; colors.push(color); colorMap.set(key, index); }
     if (index === undefined) {
       index = colors.reduce((best, item, itemIndex) => {
         const distance = item.reduce((sum, value, channel) => sum + (value - color[channel]) ** 2, 0);
@@ -121,6 +132,116 @@ function renderArtwork(size, count, unlimited) {
   drawMode(currentMode, size, mapped);
   processingState.hidden = true;
   document.getElementById('dimensionLabel').textContent = `${format.label} · ${size} px · 96 DPI`;
+}
+
+function fillDominantShapes(image, width, height) {
+  const data = image.data;
+  const sourceData = new Uint8ClampedArray(data);
+  const visited = new Uint8Array(width * height);
+  const labels = new Int32Array(width * height).fill(-1);
+  const regions = [];
+  const regionColors = [];
+  const colorAt = index => [sourceData[index * 4], sourceData[index * 4 + 1], sourceData[index * 4 + 2]];
+  const distance = (first, second) => Math.sqrt((first[0] - second[0]) ** 2 + (first[1] - second[1]) ** 2 + (first[2] - second[2]) ** 2);
+  const neighbors = (x, y) => [[x - 1, y], [x + 1, y], [x, y - 1], [x, y + 1]].filter(([nextX, nextY]) => nextX >= 0 && nextX < width && nextY >= 0 && nextY < height);
+  const threshold = 72;
+  for (let start = 0; start < width * height; start += 1) {
+    if (visited[start]) continue;
+    const regionIndex = regions.length;
+    const queue = [start]; const region = []; const seed = colorAt(start); visited[start] = 1; labels[start] = regionIndex;
+    while (queue.length) {
+      const current = queue.pop(); const x = current % width; const y = Math.floor(current / width); region.push(current);
+      neighbors(x, y).forEach(([nextX, nextY]) => {
+        const next = nextY * width + nextX;
+        if (!visited[next] && distance(seed, colorAt(next)) <= threshold) { visited[next] = 1; labels[next] = regionIndex; queue.push(next); }
+      });
+    }
+    regions.push(region);
+  }
+  regions.forEach(region => {
+    if (region.length < 3) { regionColors.push(colorAt(region[0])); return; }
+    const histogram = new Map();
+    region.forEach(index => {
+      const color = colorAt(index); const bucket = color.map(value => Math.round(value / 24) * 24); const key = bucket.join(',');
+      histogram.set(key, (histogram.get(key) || 0) + 1);
+    });
+    const dominant = [...histogram.entries()].sort((first, second) => second[1] - first[1])[0][0].split(',').map(Number);
+    regionColors.push(dominant);
+    region.forEach(index => { data[index * 4] = dominant[0]; data[index * 4 + 1] = dominant[1]; data[index * 4 + 2] = dominant[2]; });
+  });
+  splitTonalShapes(image, width, height, labels, neighbors, colorAt);
+  for (let index = 0; index < width * height; index += 1) {
+    const x = index % width; const y = Math.floor(index / width); const region = labels[index];
+    if (region < 0 || region >= regionColors.length) continue;
+    const touchesDifferentRegion = neighbors(x, y).some(([nextX, nextY]) => labels[nextY * width + nextX] !== region);
+    if (!touchesDifferentRegion) continue;
+    const dominant = regionColors[region];
+    const outline = dominant.map(value => Math.max(12, Math.round(value * .58)));
+    data[index * 4] = outline[0]; data[index * 4 + 1] = outline[1]; data[index * 4 + 2] = outline[2];
+  }
+}
+
+function splitTonalShapes(image, width, height, labels, neighbors, colorAt) {
+  const data = image.data;
+  const visited = new Uint8Array(width * height);
+  const tonalLabels = new Int32Array(width * height).fill(-1);
+  const tonalColors = [];
+  const tonalThreshold = 30;
+  for (let start = 0; start < width * height; start += 1) {
+    if (visited[start]) continue;
+    const parent = labels[start]; const seed = colorAt(start); const queue = [start]; const region = []; visited[start] = 1;
+    while (queue.length) {
+      const current = queue.pop(); const x = current % width; const y = Math.floor(current / width); region.push(current);
+      neighbors(x, y).forEach(([nextX, nextY]) => {
+        const next = nextY * width + nextX;
+        if (!visited[next] && labels[next] === parent && Math.abs(luminance(colorAt(next)) - luminance(seed)) <= tonalThreshold) { visited[next] = 1; queue.push(next); }
+      });
+    }
+    const histogram = new Map();
+    region.forEach(index => { const color = colorAt(index); const bucket = color.map(value => Math.round(value / 16) * 16); const key = bucket.join(','); histogram.set(key, (histogram.get(key) || 0) + 1); });
+    const dominant = [...histogram.entries()].sort((first, second) => second[1] - first[1])[0][0].split(',').map(Number);
+    const tonalIndex = tonalColors.length; tonalColors.push(dominant);
+    region.forEach(index => { tonalLabels[index] = tonalIndex; data[index * 4] = dominant[0]; data[index * 4 + 1] = dominant[1]; data[index * 4 + 2] = dominant[2]; });
+  }
+  for (let index = 0; index < width * height; index += 1) {
+    const tonalIndex = tonalLabels[index];
+    if (tonalIndex < 0) continue;
+    const x = index % width; const y = Math.floor(index / width);
+    if (!neighbors(x, y).some(([nextX, nextY]) => tonalLabels[nextY * width + nextX] !== tonalIndex)) continue;
+    const color = tonalColors[tonalIndex];
+    data[index * 4] = Math.max(10, Math.round(color[0] * .62)); data[index * 4 + 1] = Math.max(10, Math.round(color[1] * .62)); data[index * 4 + 2] = Math.max(10, Math.round(color[2] * .62));
+  }
+}
+
+function luminance([red, green, blue]) {
+  return red * .299 + green * .587 + blue * .114;
+}
+
+function nearestColor(sourceColor, colors) {
+  return colors.reduce((best, color) => {
+    const distance = color.reduce((sum, value, channel) => sum + (value - sourceColor[channel]) ** 2, 0);
+    return distance < best.distance ? { color, distance } : best;
+  }, { color: colors[0] || sourceColor, distance: Infinity }).color;
+}
+
+function buildCanvaPalette(pixels, requestedCount) {
+  const count = Math.max(2, requestedCount);
+  const samples = [];
+  for (let index = 0; index < pixels.length; index += 4) {
+    if (index % Math.max(4, Math.floor(pixels.length / 320)) !== 0) continue;
+    samples.push([pixels[index], pixels[index + 1], pixels[index + 2]]);
+  }
+  const palette = samples.slice(0, count).map(color => color.slice());
+  while (palette.length < count) palette.push(samples[palette.length % Math.max(1, samples.length)]?.slice() || [128, 128, 128]);
+  for (let iteration = 0; iteration < 5; iteration += 1) {
+    const totals = palette.map(() => [0, 0, 0, 0]);
+    samples.forEach(sample => {
+      const closest = palette.indexOf(nearestColor(sample, palette));
+      totals[closest][0] += sample[0]; totals[closest][1] += sample[1]; totals[closest][2] += sample[2]; totals[closest][3] += 1;
+    });
+    palette.forEach((color, index) => { if (totals[index][3]) { color[0] = Math.round(totals[index][0] / totals[index][3]); color[1] = Math.round(totals[index][1] / totals[index][3]); color[2] = Math.round(totals[index][2] / totals[index][3]); } });
+  }
+  return palette;
 }
 
 function applyFilter(targetCtx, width, height) {
@@ -144,6 +265,17 @@ function applyFilter(targetCtx, width, height) {
       red = Math.min(255, Math.round(red * 1.12)); blue = Math.min(255, Math.round(blue * 1.18));
     } else if (filter === 'dual-tone') {
       [red, green, blue] = tone(red, green, blue, [20, 79, 91], [242, 166, 104]);
+    } else if (filter === 'canva') {
+      const canvaContrast = 1.16;
+      red = Math.max(0, Math.min(255, Math.round(((red - 128) * canvaContrast) + 128)));
+      green = Math.max(0, Math.min(255, Math.round(((green - 128) * canvaContrast) + 128)));
+      blue = Math.max(0, Math.min(255, Math.round(((blue - 128) * canvaContrast) + 128)));
+      const canvaLuminance = red * .299 + green * .587 + blue * .114;
+      const saturationBoost = canvaLuminance < 128 ? .88 : 1.12;
+      red = Math.max(0, Math.min(255, Math.round(canvaLuminance + (red - canvaLuminance) * saturationBoost)));
+      green = Math.max(0, Math.min(255, Math.round(canvaLuminance + (green - canvaLuminance) * saturationBoost)));
+      blue = Math.max(0, Math.min(255, Math.round(canvaLuminance + (blue - canvaLuminance) * saturationBoost)));
+      red = Math.round(red / 24) * 24; green = Math.round(green / 24) * 24; blue = Math.round(blue / 24) * 24;
     } else if (filter === 'pixel-art') {
       const contrast = 1.24;
       red = Math.max(0, Math.min(255, Math.round(((red - 128) * contrast) + 128)));
@@ -420,6 +552,41 @@ function render() {
     const key = color.join(',');
     let index = colors.findIndex(item => item.key === key);
     if (index === -1 && colors.length < count) { colors.push({ key, color }); index = colors.length - 1; }
+    if (index === -1) { index = colors.reduce((best, item, idx) => { const distance = item.color.reduce((sum, value, channel) => sum + (value - color[channel]) ** 2, 0); return distance < best.distance ? { index: idx, distance } : best; }, { index: 0, distance: Infinity }).index; }
+    mapped.push(index);
+  }
+  palette = colors.map(item => item.color);
+  renderPalette(palette.length);
+  canvas.width = size; canvas.height = size;
+  const output = ctx.createImageData(size, size);
+  mapped.forEach((index, i) => { const color = palette[index]; output.data[i * 4] = color[0]; output.data[i * 4 + 1] = color[1]; output.data[i * 4 + 2] = color[2]; output.data[i * 4 + 3] = 255; });
+  ctx.putImageData(output, 0, 0);
+  if (currentMode === 'numbers') drawNumbers(size, mapped); else emptyState.hidden = true;
+  document.getElementById('dimensionLabel').textContent = `${document.getElementById('printSize').value} × ${document.getElementById('printSize').value} in · ${size} px`;
+}
+
+function drawNumbers(size, mapped) {
+  ctx.save(); ctx.font = `${Math.max(4, 42 / size)}px DM Mono`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  const cell = 1;
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) { const i = y * size + x; ctx.fillStyle = 'rgba(255,253,248,.72)'; ctx.fillRect(x, y, cell, cell); ctx.fillStyle = '#273035'; ctx.fillText(String(mapped[i] + 1), x + .5, y + .5); }
+  ctx.restore(); emptyState.hidden = true;
+}
+
+function loadFile(file) { if (!file) return; const reader = new FileReader(); reader.onload = event => { const image = new Image(); image.onload = () => { sourceCanvas.width = image.width; sourceCanvas.height = image.height; sourceCtx.drawImage(image, 0, 0); sourceImage = sourceCanvas; document.getElementById('captionText').textContent = file.name.replace(/\.[^/.]+$/, '').slice(0, 42); render(); }; image.src = event.target.result; }; reader.readAsDataURL(file); }
+
+imageInput.addEventListener('change', event => loadFile(event.target.files[0]));
+document.getElementById('demoButton').addEventListener('click', makeDemo);
+['gridSize', 'paletteSize', 'printSize'].forEach(id => document.getElementById(id).addEventListener('change', render));
+document.querySelectorAll('.mode-tab').forEach(tab => tab.addEventListener('click', () => { document.querySelectorAll('.mode-tab').forEach(item => item.classList.remove('active')); tab.classList.add('active'); currentMode = tab.dataset.mode; render(); }));
+document.getElementById('resetButton').addEventListener('click', () => { sourceImage = null; ctx.clearRect(0, 0, canvas.width, canvas.height); emptyState.hidden = false; paletteList.innerHTML = ''; });
+document.getElementById('uploadZone').addEventListener('dragover', event => { event.preventDefault(); event.currentTarget.classList.add('dragging'); });
+document.getElementById('uploadZone').addEventListener('dragleave', event => event.currentTarget.classList.remove('dragging'));
+document.getElementById('uploadZone').addEventListener('drop', event => { event.preventDefault(); event.currentTarget.classList.remove('dragging'); loadFile(event.dataTransfer.files[0]); });
+document.getElementById('exportButton').addEventListener('click', () => { const link = document.createElement('a'); link.download = `pixel-atelier-${currentMode}.png`; link.href = canvas.toDataURL('image/png'); link.click(); });
+document.getElementById('savePaletteButton').addEventListener('click', () => { const link = document.createElement('a'); link.download = 'pixel-atelier-palette.png'; link.href = canvas.toDataURL('image/png'); link.click(); });
+
+makeDemo();
+  if (index === -1 && colors.length < count) { colors.push({ key, color }); index = colors.length - 1; }
     if (index === -1) { index = colors.reduce((best, item, idx) => { const distance = item.color.reduce((sum, value, channel) => sum + (value - color[channel]) ** 2, 0); return distance < best.distance ? { index: idx, distance } : best; }, { index: 0, distance: Infinity }).index; }
     mapped.push(index);
   }
