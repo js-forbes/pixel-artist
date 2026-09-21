@@ -96,23 +96,25 @@ function render() {
 }
 
 function renderArtwork(size, count, unlimited) {
+  const activeFilter = document.getElementById('filterMode').value;
   const workingCanvas = document.createElement('canvas'); workingCanvas.width = size; workingCanvas.height = size;
   const workingCtx = workingCanvas.getContext('2d', { willReadFrequently: true });
   workingCtx.imageSmoothingEnabled = false;
   drawSourceImage(workingCtx, size, size);
   applyFilter(workingCtx, size, size);
   const filteredImage = workingCtx.getImageData(0, 0, size, size);
-  if (document.getElementById('filterMode').value === 'shape-fill') fillDominantShapes(filteredImage, size, size);
+  if (activeFilter === 'shape-fill') fillDominantShapes(filteredImage, size, size);
   const pixels = filteredImage.data;
-  const canvaFilter = document.getElementById('filterMode').value === 'canva';
-  const canvaPalette = canvaFilter ? buildCanvaPalette(pixels, Math.min(count || 24, 24)) : [];
+  const canvaFilter = activeFilter === 'canva';
+  const effectiveCount = activeFilter === 'none' || activeFilter === 'grayscale' || activeFilter === 'shape-fill' || activeFilter === 'canva' || activeFilter === 'pixel-art' ? count : Math.max(count || 18, 32);
+  const canvaPalette = canvaFilter ? buildCanvaPalette(pixels, Math.min(effectiveCount || 24, 24)) : [];
   const colors = canvaFilter ? canvaPalette.slice() : []; const mapped = []; const colorMap = new Map();
   for (let i = 0; i < pixels.length; i += 4) {
     const sourceColor = [pixels[i], pixels[i + 1], pixels[i + 2]];
-    const color = canvaFilter ? nearestColor(sourceColor, canvaPalette) : unlimited ? adaptiveColor(sourceColor) : quantize(sourceColor, count);
+    const color = canvaFilter ? nearestColor(sourceColor, canvaPalette) : unlimited ? adaptiveColor(sourceColor) : quantize(sourceColor, effectiveCount || count);
     const key = color.join(',');
     let index = colorMap.get(key);
-    if (index === undefined && !canvaFilter && (unlimited || colors.length < count)) { index = colors.length; colors.push(color); colorMap.set(key, index); }
+    if (index === undefined && !canvaFilter && (unlimited || colors.length < effectiveCount)) { index = colors.length; colors.push(color); colorMap.set(key, index); }
     if (index === undefined) {
       index = colors.reduce((best, item, itemIndex) => {
         const distance = item.reduce((sum, value, channel) => sum + (value - color[channel]) ** 2, 0);
@@ -122,7 +124,7 @@ function renderArtwork(size, count, unlimited) {
     mapped.push(index);
   }
   palette = colors; currentMapped = mapped;
-  renderPalette(unlimited ? palette.length : count, unlimited);
+  renderPalette(unlimited ? palette.length : Math.max(count, activeFilter === 'none' || activeFilter === 'grayscale' || activeFilter === 'shape-fill' || activeFilter === 'canva' || activeFilter === 'pixel-art' ? count : 32), unlimited);
   const format = getCanvasFormat();
   document.getElementById('artboard').style.aspectRatio = `${format.width}/${format.height}`;
   canvas.width = size; canvas.height = size; ctx.imageSmoothingEnabled = false;
@@ -247,24 +249,128 @@ function buildCanvaPalette(pixels, requestedCount) {
 function applyFilter(targetCtx, width, height) {
   const filter = document.getElementById('filterMode').value;
   if (filter === 'none') return;
+
+  const comicLinesEnabled = width === 512;
+  const crtLinesEnabled = width >= 128;
   const image = targetCtx.getImageData(0, 0, width, height);
   const data = image.data;
+  const clamp = value => Math.max(0, Math.min(255, value));
   const blend = (first, second, amount) => Math.round(first + (second - first) * amount);
-  const tone = (red, green, blue, shadow, highlight) => {
-    const luminance = (red * .299 + green * .587 + blue * .114) / 255;
-    const amount = Math.max(0, Math.min(1, luminance));
-    return [blend(shadow[0], highlight[0], amount), blend(shadow[1], highlight[1], amount), blend(shadow[2], highlight[2], amount)];
-  };
+  const luminance = (red, green, blue) => red * .299 + green * .587 + blue * .114;
+  const gray = (red, green, blue) => Math.round(luminance(red, green, blue) / 255 * 100);
+
   for (let index = 0; index < data.length; index += 4) {
-    let red = data[index]; let green = data[index + 1]; let blue = data[index + 2];
+    const x = (index / 4) % width;
+    const y = Math.floor(index / 4 / width);
+    let red = data[index];
+    let green = data[index + 1];
+    let blue = data[index + 2];
+
+    const brightness = luminance(red, green, blue) / 255;
+
     if (filter === 'grayscale') {
-      const value = Math.round(red * .299 + green * .587 + blue * .114);
+      const value = Math.round((red * .299 + green * .587 + blue * .114));
       red = value; green = value; blue = value;
-    } else if (filter === 'cyberpunk') {
-      [red, green, blue] = tone(red, green, blue, [8, 18, 48], [255, 52, 178]);
-      red = Math.min(255, Math.round(red * 1.12)); blue = Math.min(255, Math.round(blue * 1.18));
-    } else if (filter === 'dual-tone') {
-      [red, green, blue] = tone(red, green, blue, [20, 79, 91], [242, 166, 104]);
+    } else if (filter === 'pop-art') {
+      const average = (red + green + blue) / 3;
+      if (average > 150) {
+        [red, green, blue] = [255, 214, 124];
+      } else if (average > 90) {
+        [red, green, blue] = [255, 102, 120];
+      } else {
+        [red, green, blue] = [88, 120, 255];
+      }
+      if (brightness > 0.7) {
+        [red, green, blue] = [255, 234, 146];
+      } else if (brightness < 0.3) {
+        [red, green, blue] = [41, 53, 120];
+      }
+    } else if (filter === 'vintage') {
+      const sepiaGrey = Math.round((red * .299 + green * .587 + blue * .114));
+      red = clamp(sepiaGrey * 1.5 + 35);
+      green = clamp(sepiaGrey * 1.1 + 20);
+      blue = clamp(sepiaGrey * 0.72 + 12);
+      if (brightness > 0.6) {
+        [red, green, blue] = [220, 185, 122];
+      } else if (brightness < 0.25) {
+        [red, green, blue] = [72, 47, 28];
+      }
+    } else if (filter === 'retro') {
+      const tint = brightness > 0.55 ? [251, 178, 98] : [94, 55, 126];
+      red = blend(red, tint[0], 0.9);
+      green = blend(green, tint[1], 0.9);
+      blue = blend(blue, tint[2], 0.9);
+      if (brightness < 0.35) {
+        [red, green, blue] = [120, 36, 64];
+      }
+    } else if (filter === 'pixel-art') {
+      red = Math.round(red / 24) * 24;
+      green = Math.round(green / 24) * 24;
+      blue = Math.round(blue / 24) * 24;
+      const contrast = 1.8;
+      red = clamp((red - 128) * contrast + 128);
+      green = clamp((green - 128) * contrast + 128);
+      blue = clamp((blue - 128) * contrast + 128);
+    } else if (filter === 'comic') {
+      const value = gray(red, green, blue);
+      if (value > 70) {
+        [red, green, blue] = [255, 223, 115];
+      } else if (value > 42) {
+        [red, green, blue] = [246, 96, 110];
+      } else {
+        [red, green, blue] = [60, 90, 180];
+      }
+      if (comicLinesEnabled && (x + y) % 5 === 0) {
+        [red, green, blue] = [20, 20, 24];
+      }
+    } else if (filter === 'film') {
+      const filmGray = gray(red, green, blue);
+      red = clamp(filmGray * 1.35 + 28);
+      green = clamp(filmGray * 1.12 + 18);
+      blue = clamp(filmGray * 0.96 + 24);
+      if (brightness > 0.7) {
+        [red, green, blue] = [255, 225, 170];
+      } else if (brightness < 0.25) {
+        [red, green, blue] = [42, 52, 76];
+      }
+    } else if (filter === 'crt') {
+      const scanline = y % 2 === 0 ? 1.22 : 0.8;
+      red = clamp(red * scanline * 1.22);
+      green = clamp(green * 1.2);
+      blue = clamp(blue * 1.35);
+      if (crtLinesEnabled && y % 3 === 0) {
+        [red, green, blue] = [clamp(red - 28), clamp(green - 24), clamp(blue - 18)];
+      }
+      if (crtLinesEnabled && (x + y) % 4 === 0) {
+        [red, green, blue] = [255, 255, 255];
+      }
+    } else if (filter === 'duotone') {
+      const target = brightness > .55 ? [242, 204, 165] : [24, 74, 96];
+      red = blend(red, target[0], 0.9);
+      green = blend(green, target[1], 0.9);
+      blue = blend(blue, target[2], 0.9);
+      if (brightness > 0.75) {
+        [red, green, blue] = [255, 203, 152];
+      }
+    } else if (filter === 'halftone') {
+      const pattern = ((x + y) % 4 === 0) ? 1 : 0;
+      const threshold = brightness > .52 ? 1 : 0;
+      if (pattern || threshold) {
+        [red, green, blue] = [255, 235, 184];
+      } else {
+        [red, green, blue] = [30, 38, 46];
+      }
+      if ((x + y) % 8 === 0) {
+        [red, green, blue] = [255, 255, 255];
+      }
+    } else if (filter === 'vaporwave') {
+      const accent = brightness > .55 ? [255, 150, 220] : [98, 88, 255];
+      red = blend(red, accent[0], 0.95);
+      green = blend(green, accent[1], 0.95);
+      blue = blend(blue, accent[2], 0.95);
+      if ((x + y) % 6 < 3) {
+        [red, green, blue] = [clamp(red + 30), clamp(green + 18), clamp(blue + 28)];
+      }
     } else if (filter === 'canva') {
       const canvaContrast = 1.16;
       red = Math.max(0, Math.min(255, Math.round(((red - 128) * canvaContrast) + 128)));
@@ -276,15 +382,13 @@ function applyFilter(targetCtx, width, height) {
       green = Math.max(0, Math.min(255, Math.round(canvaLuminance + (green - canvaLuminance) * saturationBoost)));
       blue = Math.max(0, Math.min(255, Math.round(canvaLuminance + (blue - canvaLuminance) * saturationBoost)));
       red = Math.round(red / 24) * 24; green = Math.round(green / 24) * 24; blue = Math.round(blue / 24) * 24;
-    } else if (filter === 'pixel-art') {
-      const contrast = 1.24;
-      red = Math.max(0, Math.min(255, Math.round(((red - 128) * contrast) + 128)));
-      green = Math.max(0, Math.min(255, Math.round(((green - 128) * contrast) + 128)));
-      blue = Math.max(0, Math.min(255, Math.round(((blue - 128) * contrast) + 128)));
-      red = Math.round(red / 32) * 32; green = Math.round(green / 32) * 32; blue = Math.round(blue / 32) * 32;
     }
-    data[index] = red; data[index + 1] = green; data[index + 2] = blue;
+
+    data[index] = red;
+    data[index + 1] = green;
+    data[index + 2] = blue;
   }
+
   targetCtx.putImageData(image, 0, 0);
 }
 
@@ -453,8 +557,15 @@ function createPaletteCard() {
 
 function loadFile(file) { if (!file) return; originalFile = file; const reader = new FileReader(); reader.onload = event => { const image = new Image(); image.onload = () => { sourceImage = image; document.getElementById('captionText').textContent = file.name.replace(/\.[^/.]+$/, '').slice(0, 42); render(); }; image.src = event.target.result; }; reader.readAsDataURL(file); }
 
+function loadTemplate(button) {
+  const image = new Image();
+  image.onload = () => { originalFile = null; sourceImage = image; document.getElementById('captionText').textContent = button.dataset.caption; render(); };
+  image.src = button.dataset.asset;
+}
+
 imageInput.addEventListener('change', event => loadFile(event.target.files[0]));
 document.getElementById('demoButton').addEventListener('click', makeDemo);
+document.querySelectorAll('.template-button').forEach(button => button.addEventListener('click', () => loadTemplate(button)));
 ['gridSize', 'paletteSize', 'printSize', 'orientation', 'filterMode'].forEach(id => document.getElementById(id).addEventListener('change', render));
 document.getElementById('fitMode').addEventListener('change', event => { cropPosition = { x: .5, y: .5 }; document.getElementById('artboard').classList.toggle('crop-enabled', event.currentTarget.value === 'crop'); render(); });
 document.querySelectorAll('.mode-tab').forEach(tab => tab.addEventListener('click', () => { document.querySelectorAll('.mode-tab').forEach(item => { item.classList.remove('active'); item.setAttribute('aria-pressed', 'false'); }); tab.classList.add('active'); tab.setAttribute('aria-pressed', 'true'); currentMode = tab.dataset.mode; render(); }));
