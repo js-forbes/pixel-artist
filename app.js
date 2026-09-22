@@ -100,6 +100,23 @@ function renderArtwork(size, count, unlimited) {
   const workingCanvas = document.createElement('canvas'); workingCanvas.width = size; workingCanvas.height = size;
   const workingCtx = workingCanvas.getContext('2d', { willReadFrequently: true });
   workingCtx.imageSmoothingEnabled = false;
+
+  if (activeFilter === 'canva') {
+    const retroResult = applyRetroCanvaPixelArtFilter(sourceImage, size);
+    palette = retroResult.palette;
+    currentMapped = retroResult.mapped;
+    renderPalette(16, false);
+    const format = getCanvasFormat();
+    document.getElementById('artboard').style.aspectRatio = `${format.width}/${format.height}`;
+    canvas.width = size; canvas.height = size; ctx.imageSmoothingEnabled = false;
+    ctx.clearRect(0, 0, size, size);
+    ctx.drawImage(retroResult.canvas, 0, 0, size, size);
+    drawMode(currentMode, size, currentMapped);
+    processingState.hidden = true;
+    document.getElementById('dimensionLabel').textContent = `${format.label} · ${size} px · 96 DPI`;
+    return;
+  }
+
   drawSourceImage(workingCtx, size, size);
   applyFilter(workingCtx, size, size);
   const filteredImage = workingCtx.getImageData(0, 0, size, size);
@@ -224,6 +241,146 @@ function nearestColor(sourceColor, colors) {
     const distance = color.reduce((sum, value, channel) => sum + (value - sourceColor[channel]) ** 2, 0);
     return distance < best.distance ? { color, distance } : best;
   }, { color: colors[0] || sourceColor, distance: Infinity }).color;
+}
+
+function findNearestColorIndex(color, centroids) {
+  let bestIndex = 0; let bestDistance = Infinity;
+  for (let index = 0; index < centroids.length; index += 1) {
+    const centroid = centroids[index];
+    const distance = (color[0] - centroid[0]) ** 2 + (color[1] - centroid[1]) ** 2 + (color[2] - centroid[2]) ** 2;
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestIndex = index;
+    }
+  }
+  return bestIndex;
+}
+
+function runKMeansQuantization(samples, k = 16, iterations = 12) {
+  if (!samples.length) return Array.from({ length: k }, () => [0, 0, 0]);
+  const centroids = Array.from({ length: k }, (_, index) => {
+    const sampleIndex = Math.min(samples.length - 1, Math.floor((index + 0.5) * samples.length / k));
+    return samples[sampleIndex].slice();
+  });
+
+  for (let iteration = 0; iteration < iterations; iteration += 1) {
+    const buckets = Array.from({ length: k }, () => ({ total: [0, 0, 0], count: 0 }));
+    samples.forEach(sample => {
+      const closestIndex = findNearestColorIndex(sample, centroids);
+      const bucket = buckets[closestIndex];
+      bucket.total[0] += sample[0];
+      bucket.total[1] += sample[1];
+      bucket.total[2] += sample[2];
+      bucket.count += 1;
+    });
+
+    let changed = false;
+    for (let index = 0; index < k; index += 1) {
+      const bucket = buckets[index];
+      if (!bucket.count) continue;
+      const nextCentroid = [
+        Math.round(bucket.total[0] / bucket.count),
+        Math.round(bucket.total[1] / bucket.count),
+        Math.round(bucket.total[2] / bucket.count)
+      ];
+      if (nextCentroid[0] !== centroids[index][0] || nextCentroid[1] !== centroids[index][1] || nextCentroid[2] !== centroids[index][2]) {
+        centroids[index] = nextCentroid;
+        changed = true;
+      }
+    }
+    if (!changed) break;
+  }
+
+  return centroids;
+}
+
+function applyRetroCanvaPixelArtFilter(sourceImage, targetSize) {
+  const originalWidth = sourceImage.width || sourceImage.naturalWidth || sourceCanvas.width;
+  const originalHeight = sourceImage.height || sourceImage.naturalHeight || sourceCanvas.height;
+  const downscaledWidth = Math.max(1, Math.floor(originalWidth / 6));
+  const downscaledHeight = Math.max(1, Math.floor(originalHeight / 6));
+
+  const sourceCanvasForProcess = document.createElement('canvas');
+  sourceCanvasForProcess.width = originalWidth;
+  sourceCanvasForProcess.height = originalHeight;
+  const sourceCtxForProcess = sourceCanvasForProcess.getContext('2d', { willReadFrequently: true });
+  sourceCtxForProcess.imageSmoothingEnabled = false;
+  sourceCtxForProcess.drawImage(sourceImage, 0, 0, originalWidth, originalHeight);
+
+  const lowResCanvas = document.createElement('canvas');
+  lowResCanvas.width = downscaledWidth;
+  lowResCanvas.height = downscaledHeight;
+  const lowResCtx = lowResCanvas.getContext('2d', { willReadFrequently: true });
+  lowResCtx.imageSmoothingEnabled = false;
+  lowResCtx.drawImage(sourceCanvasForProcess, 0, 0, downscaledWidth, downscaledHeight);
+
+  const lowResImage = lowResCtx.getImageData(0, 0, downscaledWidth, downscaledHeight);
+  const lowResPixels = lowResImage.data;
+  const samples = [];
+  const alphaMask = new Uint8Array(downscaledWidth * downscaledHeight);
+
+  for (let index = 0; index < lowResPixels.length; index += 4) {
+    const pixelIndex = index / 4;
+    const red = lowResPixels[index];
+    const green = lowResPixels[index + 1];
+    const blue = lowResPixels[index + 2];
+    const alpha = lowResPixels[index + 3];
+    alphaMask[pixelIndex] = alpha;
+    samples.push([red, green, blue]);
+  }
+
+  const centroids = runKMeansQuantization(samples, 16, 12);
+  const quantizedLowRes = new Uint8ClampedArray(lowResPixels.length);
+  const quantizedLowResPaletteIndex = new Uint8Array(downscaledWidth * downscaledHeight);
+
+  for (let index = 0; index < lowResPixels.length; index += 4) {
+    const pixelIndex = index / 4;
+    const sample = [lowResPixels[index], lowResPixels[index + 1], lowResPixels[index + 2]];
+    const nearestIndex = findNearestColorIndex(sample, centroids);
+    quantizedLowResPaletteIndex[pixelIndex] = nearestIndex;
+    const color = centroids[nearestIndex];
+    quantizedLowRes[index] = color[0];
+    quantizedLowRes[index + 1] = color[1];
+    quantizedLowRes[index + 2] = color[2];
+    quantizedLowRes[index + 3] = alphaMask[pixelIndex] ?? 255;
+  }
+
+  const reconstructed = new Uint8ClampedArray(originalWidth * originalHeight * 4);
+  for (let y = 0; y < originalHeight; y += 1) {
+    const srcY = Math.min(downscaledHeight - 1, Math.floor((y / originalHeight) * downscaledHeight));
+    for (let x = 0; x < originalWidth; x += 1) {
+      const srcX = Math.min(downscaledWidth - 1, Math.floor((x / originalWidth) * downscaledWidth));
+      const sourceIndex = (srcY * downscaledWidth + srcX) * 4;
+      const destinationIndex = (y * originalWidth + x) * 4;
+      reconstructed[destinationIndex] = quantizedLowRes[sourceIndex];
+      reconstructed[destinationIndex + 1] = quantizedLowRes[sourceIndex + 1];
+      reconstructed[destinationIndex + 2] = quantizedLowRes[sourceIndex + 2];
+      reconstructed[destinationIndex + 3] = quantizedLowRes[sourceIndex + 3];
+    }
+  }
+
+  const reconstructionCanvas = document.createElement('canvas');
+  reconstructionCanvas.width = originalWidth;
+  reconstructionCanvas.height = originalHeight;
+  const reconstructionCtx = reconstructionCanvas.getContext('2d', { willReadFrequently: true });
+  const reconstructedImage = new ImageData(reconstructed, originalWidth, originalHeight);
+  reconstructionCtx.putImageData(reconstructedImage, 0, 0);
+
+  const previewCanvas = document.createElement('canvas');
+  previewCanvas.width = targetSize;
+  previewCanvas.height = targetSize;
+  const previewCtx = previewCanvas.getContext('2d', { willReadFrequently: true });
+  previewCtx.imageSmoothingEnabled = false;
+  previewCtx.drawImage(reconstructionCanvas, 0, 0, targetSize, targetSize);
+
+  const previewPixels = previewCtx.getImageData(0, 0, targetSize, targetSize).data;
+  const mapped = [];
+  for (let index = 0; index < previewPixels.length; index += 4) {
+    const sample = [previewPixels[index], previewPixels[index + 1], previewPixels[index + 2]];
+    mapped.push(findNearestColorIndex(sample, centroids));
+  }
+
+  return { palette: centroids, mapped, canvas: previewCanvas, imageData: reconstructedImage, outputPixels: previewPixels };
 }
 
 function buildCanvaPalette(pixels, requestedCount) {
