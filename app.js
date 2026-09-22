@@ -757,6 +757,30 @@ document.getElementById('artboard').addEventListener('pointercancel', event => {
 });
 
 makeDemo();
+
+const adPopup = document.getElementById('adPopup');
+const closeAdPopup = () => {
+  adPopup.hidden = true;
+  sessionStorage.setItem('pixelAtelierAdPopupSeen', 'true');
+};
+
+document.getElementById('adPopupClose').addEventListener('click', closeAdPopup);
+adPopup.addEventListener('click', event => {
+  if (event.target === adPopup) closeAdPopup();
+});
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && !adPopup.hidden) closeAdPopup();
+});
+
+if (!sessionStorage.getItem('pixelAtelierAdPopupSeen')) {
+  window.setTimeout(() => {
+    adPopup.hidden = false;
+    document.getElementById('adPopupClose').focus();
+    try { (window.adsbygoogle = window.adsbygoogle || []).push({}); } catch (error) { console.warn('AdSense popup was not ready:', error); }
+  }, 8000);
+}
+
+try { (window.adsbygoogle = window.adsbygoogle || []).push({}); } catch (error) { console.warn('AdSense banner was not ready:', error); }
 /*
 const canvas = document.getElementById('artCanvas');
 const ctx = canvas.getContext('2d');
